@@ -143,6 +143,7 @@ import { resolve } from 'path';
 export default defineConfig({
   plugins: [react()],
   root: 'src/app',
+  base: './',
   build: {
     outDir: resolve(__dirname, 'dist/app'),
     emptyOutDir: true,
@@ -526,7 +527,7 @@ describe('store', () => {
     expect(loaded.screens['레시피관리/01_목록'].blocks[0].content).toBe('1. 검색');
   });
 
-  it('ensureStoreDir creates .guidepilot directory', () => {
+  it('ensureStoreDir creates .guidepilot directory', async () => {
     ensureStoreDir(TMP);
     const { existsSync } = await import('fs');
     expect(existsSync(join(TMP, '.guidepilot'))).toBe(true);
@@ -607,7 +608,7 @@ git commit -m "feat: data store with tests"
 
 ```typescript
 // src/cli/cmd-init.ts
-import { existsSync, writeFileSync } from 'fs';
+import { existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { ensureStoreDir } from '../core/store.js';
 
@@ -626,7 +627,7 @@ export function runInit(projectRoot: string): void {
 
   if (!existsSync(previewDir)) {
     console.log('Creating preview/ folder...');
-    ensureStoreDir(previewDir); // creates the dir
+    mkdirSync(previewDir, { recursive: true });
   }
 
   if (existsSync(yamlPath)) {
@@ -686,6 +687,7 @@ program
   .option('--token <token>', 'Notion API token (for notion target)')
   .option('--page-id <id>', 'Notion parent page ID (for notion target)')
   .option('-o, --output <path>', 'Output PDF path (for pdf target)', 'guidepilot-guide.pdf')
+  .option('--image-base-url <url>', 'Public base URL for images in Notion export (e.g. https://raw.githubusercontent.com/org/repo/main)')
   .action(async (target, opts) => {
     const { runExport } = await import('./cmd-export.js');
     await runExport(process.cwd(), target, opts);
@@ -796,8 +798,8 @@ export async function startDevServer(projectRoot: string, port: number): Promise
   const appDistDir = join(__dirname, '..', 'app');
   app.use(express.static(appDistDir));
 
-  // SPA fallback
-  app.get('*', (_req, res) => {
+  // SPA fallback — use Express 5-compatible catch-all pattern
+  app.get('/{*splat}', (_req, res) => {
     res.sendFile(join(appDistDir, 'index.html'));
   });
 
@@ -873,7 +875,7 @@ export function useGuide() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/guide-data.json')
+    fetch('./guide-data.json')
       .then(r => r.json())
       .then((d: GuideData) => { setData(d); setLoading(false); })
       .catch(e => { setError(String(e)); setLoading(false); });
@@ -900,14 +902,24 @@ export function useGuide() {
 
 ```tsx
 // src/app/App.tsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGuide } from './hooks/useGuide.js';
 import { Sidebar } from './components/Sidebar.js';
 import { ScreenEditor } from './components/ScreenEditor.js';
 
+const isPdfMode = new URLSearchParams(window.location.search).get('pdf') === 'true';
+
 export function App() {
   const { data, loading, error, saveScreenData } = useGuide();
   const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
+
+  // In PDF mode, auto-select the first screen so Puppeteer captures real content
+  useEffect(() => {
+    if (isPdfMode && data && !selectedScreenId) {
+      const firstScreen = data.sections[0]?.screens[0];
+      if (firstScreen) setSelectedScreenId(firstScreen.id);
+    }
+  }, [data, selectedScreenId]);
 
   if (loading) return <div style={{ padding: 24 }}>Loading guide...</div>;
   if (error) return <div style={{ padding: 24, color: 'red' }}>Error: {error}</div>;
@@ -921,8 +933,13 @@ export function App() {
     ? (data.store.screens[selectedScreenId] ?? { annotations: [], blocks: [] })
     : null;
 
+  // data-guidepilot-ready only appears after a screen is selected and rendered,
+  // so Puppeteer doesn't capture the "select a screen" empty state in PDF mode.
   return (
-    <div style={{ display: 'flex', height: '100vh' }}>
+    <div
+      style={{ display: 'flex', height: '100vh' }}
+      {...(selectedScreen ? { 'data-guidepilot-ready': 'true' } : {})}
+    >
       <Sidebar
         sections={data.sections}
         selectedScreenId={selectedScreenId}
@@ -1266,18 +1283,18 @@ function htmlToBlocks(html: string): ContentBlock[] {
     if (!(node instanceof HTMLElement)) return;
     const text = node.textContent ?? '';
     if (node.tagName === 'H2') {
-      blocks.push({ id: `b${order}`, type: 'heading', content: text, order: order++ });
+      blocks.push({ id: crypto.randomUUID(), type: 'heading', content: text, order: order++ });
     } else if (node.tagName === 'BLOCKQUOTE') {
       const inner = text.replace(/^[⚠️💡]\s*/, '');
       const type = text.startsWith('⚠️') ? 'warning' : 'callout';
-      blocks.push({ id: `b${order}`, type, content: inner, order: order++ });
+      blocks.push({ id: crypto.randomUUID(), type, content: inner, order: order++ });
     } else if (node.tagName === 'OL') {
       const steps = Array.from(node.querySelectorAll('li'))
         .map((li, i) => `${i + 1}. ${li.textContent}`)
         .join('\n');
-      blocks.push({ id: `b${order}`, type: 'steps', content: steps, order: order++ });
+      blocks.push({ id: crypto.randomUUID(), type: 'steps', content: steps, order: order++ });
     } else if (text.trim()) {
-      blocks.push({ id: `b${order}`, type: 'paragraph', content: text, order: order++ });
+      blocks.push({ id: crypto.randomUUID(), type: 'paragraph', content: text, order: order++ });
     }
   });
 
@@ -1294,10 +1311,14 @@ export function BlockEditor({ blocks, onChange }: Props) {
   });
 
   useEffect(() => {
-    if (editor && blocks.length === 0) {
-      editor.commands.setContent('');
+    if (editor) {
+      editor.commands.setContent(blocksToHtml(blocks), false);
     }
-  }, [blocks, editor]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor]);
+  // Note: intentionally only on `editor` mount — BlockEditor must be remounted
+  // with key={screen.id} in ScreenEditor when the selected screen changes,
+  // so the editor reinitializes from props rather than syncing mid-session.
 
   return (
     <div style={{ flex: 1, padding: 20, overflowY: 'auto' }}>
@@ -1461,6 +1482,7 @@ export function ScreenEditor({ screen, screenData, onSave }: Props) {
           overflow: 'hidden',
         }}>
           <BlockEditor
+            key={screen.id}
             blocks={screenData.blocks}
             onChange={handleBlocksChange}
           />
@@ -1618,8 +1640,32 @@ git commit -m "feat: guidepilot build static HTML output"
 ```typescript
 // src/export/pdf.ts
 import puppeteer from 'puppeteer';
-import { join } from 'path';
-import { existsSync } from 'fs';
+import { createServer } from 'http';
+import { readFileSync, existsSync } from 'fs';
+import { join, extname } from 'path';
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html', '.js': 'application/javascript',
+  '.css': 'text/css', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+};
+
+function serveStatic(distDir: string): Promise<{ port: number; close: () => void }> {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url!, 'http://localhost');
+    let file = join(distDir, url.pathname === '/' ? 'index.html' : url.pathname);
+    if (!existsSync(file)) file = join(distDir, 'index.html');
+    const mime = MIME[extname(file)] ?? 'application/octet-stream';
+    res.writeHead(200, { 'Content-Type': mime });
+    res.end(readFileSync(file));
+  });
+  return new Promise(resolve =>
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as { port: number };
+      resolve({ port, close: () => server.close() });
+    })
+  );
+}
 
 export async function exportPdf(projectRoot: string, outputPath: string): Promise<void> {
   const distDir = join(projectRoot, 'guidepilot-dist');
@@ -1629,16 +1675,19 @@ export async function exportPdf(projectRoot: string, outputPath: string): Promis
     process.exit(1);
   }
 
+  console.log('Starting local server for PDF render...');
+  const { port, close } = await serveStatic(distDir);
+
   console.log('Launching browser...');
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
 
-  // Load built guide from local file
-  await page.goto(`file://${join(distDir, 'index.html')}`, { waitUntil: 'networkidle0' });
+  // Serve over HTTP so root-relative data fetches work correctly
+  await page.goto(`http://127.0.0.1:${port}/?pdf=true`, { waitUntil: 'networkidle0' });
 
-  // Wait for the app to load
-  await page.waitForSelector('[data-guidepilot-ready]', { timeout: 10000 }).catch(() => {
-    console.warn('App ready signal not found, proceeding anyway.');
+  // data-guidepilot-ready appears only after a screen is selected and rendered
+  await page.waitForSelector('[data-guidepilot-ready]', { timeout: 15000 }).catch(() => {
+    console.warn('App ready signal not found — guide may have no screens.');
   });
 
   await page.pdf({
@@ -1649,6 +1698,7 @@ export async function exportPdf(projectRoot: string, outputPath: string): Promis
   });
 
   await browser.close();
+  close();
   console.log(`PDF saved to: ${outputPath}`);
 }
 ```
@@ -1671,6 +1721,7 @@ interface ExportOptions {
   token?: string;
   pageId?: string;
   output?: string;
+  imageBaseUrl?: string;
 }
 
 export async function runExport(projectRoot: string, target: string, opts: ExportOptions): Promise<void> {
@@ -1687,7 +1738,7 @@ export async function runExport(projectRoot: string, target: string, opts: Expor
       process.exit(1);
     }
     const { exportNotion } = await import('../export/notion.js');
-    await exportNotion(projectRoot, opts.token, opts.pageId);
+    await exportNotion(projectRoot, opts.token, opts.pageId, opts.imageBaseUrl);
   } else {
     console.error(`Unknown export target: ${target}. Use: pdf | notion`);
     process.exit(1);
@@ -1735,7 +1786,8 @@ import { readFileSync, existsSync } from 'fs';
 export async function exportNotion(
   projectRoot: string,
   token: string,
-  parentPageId: string
+  parentPageId: string,
+  imageBaseUrl?: string
 ): Promise<void> {
   const notion = new Client({ auth: token });
   const previewDir = join(projectRoot, 'preview');
@@ -1763,14 +1815,16 @@ export async function exportNotion(
           type: 'heading_2',
           heading_2: { rich_text: [{ text: { content: screen.label } }] },
         },
-        {
+        // Image block only included when a public base URL is provided via --image-base-url.
+        // Without it, Notion can't reach local files, so we skip rather than embed a broken URL.
+        ...(imageBaseUrl ? [{
           object: 'block',
           type: 'image',
           image: {
             type: 'external',
-            external: { url: `https://raw.githubusercontent.com/placeholder/${screen.imageUrl}` },
+            external: { url: `${imageBaseUrl.replace(/\/$/, '')}/${screen.imageUrl}` },
           },
-        },
+        }] : []),
         ...screenData.blocks.map(block => {
           if (block.type === 'warning' || block.type === 'callout') {
             return {
@@ -1838,7 +1892,9 @@ name: Guidepilot — Build Guide
 on:
   push:
     branches: [main]
-    paths: ['preview/**']
+    paths:
+      - 'preview/**'
+      - '.guidepilot/**'
 
 permissions:
   contents: read
