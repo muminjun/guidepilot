@@ -11,4 +11,5 @@ export default defineConfig({
   platform: 'node',
   external: ['vite', 'puppeteer'],
   outDir: 'dist',
+  banner: { js: '#!/usr/bin/env node' },
 });
