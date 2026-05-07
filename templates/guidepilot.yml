@@ -1,0 +1,29 @@
+# .github/workflows/guidepilot.yml
+# Copy this file to your project's .github/workflows/ folder.
+name: Guidepilot — Build Guide
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'preview/**'
+      - '.guidepilot/**'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-guide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx guidepilot build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: guidepilot-dist/
+      - uses: actions/deploy-pages@v4
