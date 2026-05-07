@@ -1,0 +1,32 @@
+# .github/workflows/guidepilot-flutter.yml
+# For Flutter projects that generate screenshots via flutter test.
+name: Guidepilot — Flutter Guide
+
+on:
+  push:
+    branches: [main]
+    paths: ['lib/src/dev/preview/**']
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-guide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter test test/preview_screenshot_test.dart
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npx guidepilot build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: guidepilot-dist/
+      - uses: actions/deploy-pages@v4
