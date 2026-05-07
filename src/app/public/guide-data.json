@@ -1,0 +1,78 @@
+{
+  "sections": [
+    {
+      "id": "getting-started",
+      "label": "Getting Started",
+      "order": 0,
+      "screens": [
+        {
+          "id": "getting-started/01_welcome",
+          "label": "Welcome",
+          "imageUrl": "preview/getting-started/01_welcome.png",
+          "order": 1
+        },
+        {
+          "id": "getting-started/02_setup",
+          "label": "Setup",
+          "imageUrl": "preview/getting-started/02_setup.png",
+          "order": 2
+        }
+      ]
+    },
+    {
+      "id": "features",
+      "label": "Features",
+      "order": 1,
+      "screens": [
+        {
+          "id": "features/01_annotation",
+          "label": "Annotation",
+          "imageUrl": "preview/features/01_annotation.png",
+          "order": 1
+        }
+      ]
+    }
+  ],
+  "store": {
+    "screens": {
+      "getting-started/01_welcome": {
+        "annotations": [
+          {
+            "id": "ann1",
+            "type": "badge",
+            "x_ratio": 0.3,
+            "y_ratio": 0.2,
+            "properties": { "number": 1, "color": "#2563eb" }
+          },
+          {
+            "id": "ann2",
+            "type": "arrow",
+            "x_ratio": 0.6,
+            "y_ratio": 0.5,
+            "properties": { "color": "#ef4444", "label": "" }
+          }
+        ],
+        "blocks": [
+          {
+            "id": "blk1",
+            "type": "heading",
+            "content": "Welcome to Guidepilot",
+            "order": 0
+          },
+          {
+            "id": "blk2",
+            "type": "paragraph",
+            "content": "Drop screenshots in preview/, annotate them, and export anywhere.",
+            "order": 1
+          },
+          {
+            "id": "blk3",
+            "type": "steps",
+            "content": "1. Run guidepilot init\n2. Add screenshots to preview/\n3. Run guidepilot dev",
+            "order": 2
+          }
+        ]
+      }
+    }
+  }
+}
